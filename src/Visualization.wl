@@ -20,7 +20,7 @@ padZero[num_]:=Module[
 
 
 (* ::Text:: *)
-(*input: segmentation -> {{x1, y1, x2, y2, ..., xn, yn}, {}};*)
+(*input: segmentation -> {{Subscript[x, 11], Subscript[y, 11], Subscript[x, 12], Subscript[y, 12], ..., Subscript[x, 1n], Subscript[y, 1n]}, {Subscript[x, 21], Subscript[y, 21], Subscript[x, 22], Subscript[y, 22], ..., Subscript[x, 2n], Subscript[y, 2n]}};*)
 (*output: Graphics mask *)
 
 
@@ -33,13 +33,6 @@ getMask[pts_List, w_, h_]:= Module[
 	vtx = convertAnnotationMask[pts, h];
 	Binarize @ Rasterize[Graphics[{White, Polygon@@vtx}, PlotRange->{{0, w}, {0, h}}, 
 	Background->Black], "Image", ImageSize->{w, h}]
-]
-
-
-showMask[pts_List, h_]:= Module[
-	{vtx},
-	vtx = convertAnnotationMask[pts, h];
-	Graphics[{ RandomColor[], Opacity[0.1], Sequence@@Polygon/@vtx}]
 ]
 
 
@@ -73,7 +66,57 @@ extractBBoxAndMask[img_, bbox_, segPts_List]:= Module[
 
 
 (* ::Section:: *)
-(*Label box*)
+(*InstanceSegmentation*)
+
+
+(*instanceSegmentation[img_, ennet_, detectionThreshold_, overlapThreshold_]:= Module[
+	{labels, bboxes, probs, masks, coloredMasks, yoloVis, yoloRes, centers},
+	yoloRes = detection[img, detectionThreshold, overlapThreshold];
+	{labels, bboxes, probs} = convertYoloResult[yoloRes];
+	centers = Mean/@ bboxes;
+	masks = produceMask[ennet,img, bboxes];
+	coloredMasks = Flatten[{RandomColor[], Opacity[.4], #}&/@ masks];
+	yoloVis = Transpose @ MapThread[
+		{
+			{Green,Opacity[0],#2},
+			Style[
+				Inset[#1<>" ("<>ToString@Round[#3, .01]<>")", #2[[1]], {Left, Top} ],
+				FontSize -> Scaled[.02], GrayLevel[0,1], Background->GrayLevel[1,0]
+			]
+		}&, Transpose[yoloRes]];
+	HighlightImage[img, Join[{coloredMasks,yoloVis}], ImagePadding -> Scaled[.02]]	
+	(*Flatten[{coloredMasks, visLabels, visBoxes}]*)
+]*)
+
+
+convertYoloResult[yoloRes_]:= Transpose[yoloRes]/.Rectangle -> List
+
+
+instanceSegmentation[img_, ennet_, detectionThreshold_, overlapThreshold_]:= Module[
+	{labels, bboxes, probs, masks, coloredMasks, yoloVis, yoloRes, rectangles, centers},
+	
+	yoloRes = detection[img, detectionThreshold, overlapThreshold];
+	rectangles =  Transpose[yoloRes][[2]];
+	{labels, bboxes, probs} = Transpose[yoloRes]/.Rectangle -> List;
+	centers = Mean/@ bboxes;
+	masks = produceMask[ennet,img, bboxes];
+	coloredMasks = Flatten[{RandomColor[], Opacity[.45], #}&/@ masks];
+	yoloVis = Transpose @ MapThread[
+		{
+			{Darker @ Green,Opacity[0],#2},
+			Style[
+				Inset[#1<>" \n("<>ToString@Round[#3, .01]<>")", #4, {Center, Center} ],
+				FontSize -> Scaled[.03], FontColor -> White, GrayLevel[0,1], Background -> GrayLevel[1,0]
+			]
+		}&, {labels, rectangles, probs, centers}];
+	HighlightImage[img, Join[{coloredMasks,yoloVis}], ImagePadding -> Scaled[.02],ImageSize->Large]	
+	(*Flatten[{coloredMasks, visLabels, visBoxes}]*)
+]
+
+
+(* ::Section::Closed:: *)
+(*Bounding Box*)
+
 
 
 labelBox[class_ -> box_]:= Module[{coord,textCoord},(*convert class\[Rule]boxes to labeled boxes*)
@@ -81,34 +124,6 @@ labelBox[class_ -> box_]:= Module[{coord,textCoord},(*convert class\[Rule]boxes 
 	textCoord={(coord[[1,1]]+coord[[2,1]])/2.,coord[[1,2]]-0.04};
 	{{GeometricTransformation[Text[Style[labels[[class]], 20, Darker@Blue],textCoord], 
 	ReflectionTransform[{0,1},textCoord]]},EdgeForm[Directive[Red,Thick]],Transparent,box}]
-
-
-(* ::Section:: *)
-(*InstanceSegmentation*)
-
-
-instanceSegmentation[img_, ennet_, detectionThreshold_, overlapThreshold_]:= Module[
-	{labels, bboxes, probs, masks, coloredMasks, yoloVis, yoloRes},
-	yoloRes = detection[img, detectionThreshold, overlapThreshold];
-	{labels, bboxes, probs} = convertYoloResult[yoloRes];
-	masks = produceMask[ennet,img, bboxes];
-	coloredMasks = Flatten[{RandomColor[], Opacity[.4], #}&/@ masks];
-	yoloVis = Transpose @ MapThread[
-		{
-			{Black,Opacity[0],#2},
-			Style[
-				Inset[#1<>" ("<>ToString@Round[#3, .01]<>")",#2[[1]],{Left,Top}],
-				FontSize -> Scaled[.02], GrayLevel[0,1], Background->GrayLevel[1,0]
-			]
-		}&, Transpose[yoloRes]];
-	HighlightImage[img, Join[{coloredMasks,yoloVis}], ImagePadding -> Scaled[.02]]	
-	(*Flatten[{coloredMasks, visLabels, visBoxes}]*)
-]
-
-
-(* ::Section:: *)
-(*Bounding Box*)
-
 
 coordToBox[center_, boxCord_, scaling_: 1]:=Module[
 	{bx,by,w,h},
@@ -157,3 +172,69 @@ boxCoord=ArrayReshape[vec[[980+98+1;;-1]],{49,2,4}];
 boxes=Dataset@Select[Flatten@Table[<|"coord"->coordToBox[grid[[i]],boxCoord[[i,b]],boxScaling],"class"->c,"prob"->If[#<=confidentThreshold,0,#]&@(prob[[i,c]]*confid[[i,b]])|>,{c,1,20},{b,1,2},{i,1,49}],#prob>=confidentThreshold&];
 boxNonMax=nonMaxSuppression[boxes,overlapThreshold,confidentThreshold];
 drawBoxes[Image[img],boxNonMax]]
+
+
+(* ::Title:: *)
+(*Utility*)
+
+
+(* ::Subsection:: *)
+(*ReadOutput*)
+
+
+readOutput[outputTensor_]:= outputTensor[[All, All, 1]]
+
+
+(* ::Subsection:: *)
+(*padRegionMask*)
+
+
+padRegionMask[trimmedMask_, bboxLocal_, w_, h_]:= Block[
+	{x1,y1,x2,y2},
+	{{x1,y1},{x2,y2}} = bboxLocal;
+	ImagePad[trimmedMask, 
+		{{x1, w - x2},
+		 {y1, h - y2}}]
+]
+
+
+(* ::Subsection:: *)
+(*Yolo Result Get*)
+
+
+ConvertYoloResult[yoloRes_]:= Transpose[yoloRes]/.Rectangle -> List
+
+
+(* ::Subsection:: *)
+(*Crop Regions*)
+
+
+cropRegion[img_, bbox_]:= Module[
+	{w, h, regions},
+	{w, h} = ImageDimensions[img];
+	regions = ImageTrim[img, #] &/@ bbox
+]
+
+
+(* ::Subsection:: *)
+(*produceMask*)
+
+
+(* ::Text:: *)
+(*out: output tensor of network*)
+(*bbox: a list of bounding boxes*)
+(*w = width of image*)
+(*h = height of image*)
+
+
+produceMask[net_, img_, bbox_]:= Module[
+	{w, h, regions, outputTensor, masks, regionMasks, resizedRegionMask},
+	{w, h} = ImageDimensions[img];
+	regions = ImageTrim[img, #] &/@ bbox;
+	
+	outputTensor = readOutput/@ ( net /@ regions);
+	masks = Binarize/@( Image /@ outputTensor);
+	regionMasks = 1 - (Erosion[#, IdentityMatrix[3]]& /@ masks);
+	resizedRegionMask = MapThread[ImageResize[#1, #2]&, {regionMasks, ImageDimensions/@regions}];
+	MapThread[padRegionMask[#1, #2, w, h]&, {resizedRegionMask, bbox}]	
+]

@@ -38,7 +38,7 @@ ConvertYoloResult[yoloRes_]:= Transpose[yoloRes]/.Rectangle -> List
 cropRegion[img_, bbox_]:= Module[
 	{w, h, regions},
 	{w, h} = ImageDimensions[img];
-	regions = extractBBox[img, #] &/@ bbox
+	regions = ImageTrim[img, #] &/@ bbox
 ]
 
 
@@ -56,7 +56,7 @@ cropRegion[img_, bbox_]:= Module[
 produceMask[net_, img_, bbox_]:= Module[
 	{w, h, regions, outputTensor, masks, regionMasks, resizedRegionMask},
 	{w, h} = ImageDimensions[img];
-	regions = extractBBox[img, #] &/@ bbox;
+	regions = ImageTrim[img, #] &/@ bbox;
 	
 	outputTensor = readOutput/@ ( net /@ regions);
 	masks = Binarize/@( Image /@ outputTensor);
